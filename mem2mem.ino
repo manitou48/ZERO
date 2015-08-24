@@ -27,7 +27,7 @@ struct dmacdescriptor {
 	uint32_t dstaddr;
 	uint32_t descaddr;
 } ;
-struct dmacdescriptor wrb[12] __attribute__ ((aligned (16)));
+volatile struct dmacdescriptor wrb[12] __attribute__ ((aligned (16)));
 struct dmacdescriptor descriptor_section[12] __attribute__ ((aligned (16)));
 struct dmacdescriptor descriptor __attribute__ ((aligned (16)));
 
@@ -44,7 +44,7 @@ void dma_init() {
 	PM->APBBMASK.reg |= PM_APBBMASK_DMAC ;
 	// NVIC_EnableIRQ( DMAC_IRQn ) ;
 
-	wrb[0].descaddr = (uint32_t)&descriptor;  // or not, memcpy below?
+//	wrb[0].descaddr = (uint32_t)&descriptor;  // or not, memcpy below?
 	DMAC->BASEADDR.reg = (uint32_t)descriptor_section;
 	DMAC->WRBADDR.reg = (uint32_t)wrb;
 	DMAC->CTRL.reg = DMAC_CTRL_DMAENABLE | DMAC_CTRL_LVLEN(0xf);
@@ -64,7 +64,8 @@ void memcpy32(void *dst, const void *src, size_t n) {
 	memcpy(&descriptor_section[0],&descriptor, sizeof(DmacDescriptor));
 	DMAC->CHCTRLA.reg |= DMAC_CHCTRLA_ENABLE;
 	DMAC->SWTRIGCTRL.reg |= (1 << 0);  // trigger channel 0
-	while (! (DMAC->CHINTFLAG.reg & DMAC_CHINTENCLR_TCMPL)); // spin wait
+//	while (! (DMAC->CHINTFLAG.reg & DMAC_CHINTENCLR_TCMPL)); // spin wait
+	while (wrb[0].btctrl & DMAC_BTCTRL_VALID) ;  // spin wait
 }
 
 void setup() {
