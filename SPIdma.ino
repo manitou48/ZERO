@@ -90,7 +90,6 @@ void spi_write(void *data,  size_t n) {
 	descriptor.btctrl =   DMAC_BTCTRL_SRCINC | DMAC_BTCTRL_VALID;
 	memcpy(&descriptor_section[chnltx],&descriptor, sizeof(dmacdescriptor));
 	DMAC->CHCTRLA.reg |= DMAC_CHCTRLA_ENABLE;
-	DMAC->SWTRIGCTRL.reg |= (1 << chnltx);  // trigger channel
 	while(!dmadone);  // await DMA done isr
 }
 
