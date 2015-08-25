@@ -78,7 +78,7 @@ void spi_write(void *data,  size_t n) {
 	DMAC->CHID.reg = DMAC_CHID_ID(chnltx); // channel
 	DMAC->SWTRIGCTRL.reg &= (uint32_t)(~(1 << chnltx));
 	temp_CHCTRLB_reg = DMAC_CHCTRLB_LVL(0) | 
-	DMAC_CHCTRLB_TRIGSRC(SERCOM4_DMAC_ID_TX) | DMAC_CHCTRLB_TRIGACT_BEAT;
+	  DMAC_CHCTRLB_TRIGSRC(SERCOM4_DMAC_ID_TX) | DMAC_CHCTRLB_TRIGACT_BEAT;
 	DMAC->CHCTRLB.reg = temp_CHCTRLB_reg;
 	DMAC->CHINTENSET.reg = DMAC_CHINTENSET_MASK ; // enable all 3 interrupts
 	dmadone = 0;
