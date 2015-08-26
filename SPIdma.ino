@@ -14,10 +14,7 @@ const int SPISS = 10;
 
 
 #define BYTES 1024
-#define WORDS BYTES/sizeof(int)
-char src[BYTES] __attribute__ ((aligned (8)));
-char dst[BYTES] __attribute__ ((aligned (8)));
-int *srcw = (int *) src, *dstw = (int *)dst;
+char txbuf[BYTES], rxbuf[BYTES];
 
 void prmbs(char *lbl,unsigned long us,int bits) {
     float mbs = (float)bits/us;
@@ -39,6 +36,9 @@ dmacdescriptor descriptor_section[12] __attribute__ ((aligned (16)));
 dmacdescriptor descriptor __attribute__ ((aligned (16)));
 
 static uint32_t chnltx = 0, chnlrx = 1; // DMA channels
+enum XfrType { DoTX, DoRX, DoTXRX};
+static XfrType xtype;
+static uint8_t rxsink[1], txsrc[1] = {0xff};
 volatile uint32_t dmadone;
 
 void DMAC_Handler() {
@@ -46,12 +46,14 @@ void DMAC_Handler() {
 	uint8_t active_channel;
 
 	// disable irqs ?
+	__disable_irq();
 	active_channel =  DMAC->INTPEND.reg & DMAC_INTPEND_ID_Msk; // get channel number
 	DMAC->CHID.reg = DMAC_CHID_ID(active_channel);
 	dmadone = DMAC->CHINTFLAG.reg;
 	DMAC->CHINTFLAG.reg = DMAC_CHINTENCLR_TCMPL; // clear
 	DMAC->CHINTFLAG.reg = DMAC_CHINTENCLR_TERR;
 	DMAC->CHINTFLAG.reg = DMAC_CHINTENCLR_SUSP;
+	__enable_irq();
 }
 
 void dma_init() {
@@ -63,34 +65,79 @@ void dma_init() {
 	DMAC->BASEADDR.reg = (uint32_t)descriptor_section;
 	DMAC->WRBADDR.reg = (uint32_t)wrb;
 	DMAC->CTRL.reg = DMAC_CTRL_DMAENABLE | DMAC_CTRL_LVLEN(0xf);
+}
+
+Sercom *sercom = (Sercom   *)0x42001800U;  // SERCOM4   TODO
+
+void spi_xfr(void *txdata, void *rxdata,  size_t n) {
+	uint32_t temp_CHCTRLB_reg;
+
+	// set up transmit channel  
 	DMAC->CHID.reg = DMAC_CHID_ID(chnltx); 
 	DMAC->CHCTRLA.reg &= ~DMAC_CHCTRLA_ENABLE;
 	DMAC->CHCTRLA.reg = DMAC_CHCTRLA_SWRST;
-}
-
-Sercom *sercomtx = ((Sercom   *)0x42001800U);  // SERCOM4
-
-void spi_write(void *data,  size_t n) {
-	// transmit src increment, not dest
-	// triggers SERCOM4 TX 0x0a   RX 0x09 table 18-8
-	uint32_t temp_CHCTRLB_reg;
-
-	DMAC->CHID.reg = DMAC_CHID_ID(chnltx); // channel
 	DMAC->SWTRIGCTRL.reg &= (uint32_t)(~(1 << chnltx));
 	temp_CHCTRLB_reg = DMAC_CHCTRLB_LVL(0) | 
 	  DMAC_CHCTRLB_TRIGSRC(SERCOM4_DMAC_ID_TX) | DMAC_CHCTRLB_TRIGACT_BEAT;
 	DMAC->CHCTRLB.reg = temp_CHCTRLB_reg;
 	DMAC->CHINTENSET.reg = DMAC_CHINTENSET_MASK ; // enable all 3 interrupts
+	descriptor.descaddr = 0;
+	descriptor.dstaddr = (uint32_t) &sercom->SPI.DATA.reg;
+	descriptor.btcnt =  n;
+	descriptor.srcaddr = (uint32_t)txdata;
+	descriptor.btctrl =  DMAC_BTCTRL_VALID;
+	if (xtype != DoRX) {
+		descriptor.srcaddr += n;
+		descriptor.btctrl |= DMAC_BTCTRL_SRCINC;
+	}
+	memcpy(&descriptor_section[chnltx],&descriptor, sizeof(dmacdescriptor));
+
+	// rx channel    enable interrupts
+	DMAC->CHID.reg = DMAC_CHID_ID(chnlrx); 
+	DMAC->CHCTRLA.reg &= ~DMAC_CHCTRLA_ENABLE;
+	DMAC->CHCTRLA.reg = DMAC_CHCTRLA_SWRST;
+	DMAC->SWTRIGCTRL.reg &= (uint32_t)(~(1 << chnlrx));
+	temp_CHCTRLB_reg = DMAC_CHCTRLB_LVL(0) | 
+	  DMAC_CHCTRLB_TRIGSRC(SERCOM4_DMAC_ID_RX) | DMAC_CHCTRLB_TRIGACT_BEAT;
+	DMAC->CHCTRLB.reg = temp_CHCTRLB_reg;
+	DMAC->CHINTENSET.reg = DMAC_CHINTENSET_MASK ; // enable all 3 interrupts
 	dmadone = 0;
 	descriptor.descaddr = 0;
-	//descriptor.dstaddr = (uint32_t) &sercomtx->SPI.DATA.bit.DATA;  // TODO
-	descriptor.dstaddr = (uint32_t) (0x42001800U + 0x28);
-	descriptor.srcaddr = (uint32_t)data + n;
+	descriptor.srcaddr = (uint32_t) &sercom->SPI.DATA.reg;
 	descriptor.btcnt =  n;
-	descriptor.btctrl =   DMAC_BTCTRL_SRCINC | DMAC_BTCTRL_VALID;
-	memcpy(&descriptor_section[chnltx],&descriptor, sizeof(dmacdescriptor));
+	descriptor.dstaddr = (uint32_t)rxdata;
+	descriptor.btctrl =  DMAC_BTCTRL_VALID;
+	if (xtype != DoTX) {
+		descriptor.dstaddr += n;
+		descriptor.btctrl |= DMAC_BTCTRL_DSTINC;
+	}
+	memcpy(&descriptor_section[chnlrx],&descriptor, sizeof(dmacdescriptor));
+
+	// start both channels  ? order matter ?
+	DMAC->CHID.reg = DMAC_CHID_ID(chnltx);
 	DMAC->CHCTRLA.reg |= DMAC_CHCTRLA_ENABLE;
+	DMAC->CHID.reg = DMAC_CHID_ID(chnlrx);
+	DMAC->CHCTRLA.reg |= DMAC_CHCTRLA_ENABLE;
+
 	while(!dmadone);  // await DMA done isr
+
+	DMAC->CHID.reg = DMAC_CHID_ID(chnltx);   //disable DMA to allow lib SPI 
+	DMAC->CHCTRLA.reg &= ~DMAC_CHCTRLA_ENABLE;
+	DMAC->CHID.reg = DMAC_CHID_ID(chnlrx); 
+	DMAC->CHCTRLA.reg &= ~DMAC_CHCTRLA_ENABLE;
+}
+
+void spi_write(void *data,  size_t n) {
+	xtype = DoTX;
+	spi_xfr(data,rxsink,n);
+}
+void spi_read(void *data,  size_t n) {
+	xtype = DoRX;
+	spi_xfr(txsrc,data,n);
+}
+void spi_transfer(void *txdata, void *rxdata,  size_t n) {
+	xtype = DoTXRX;
+	spi_xfr(txdata,rxdata,n);
 }
 
 void setup() {
@@ -99,31 +146,46 @@ void setup() {
 	digitalWrite(SPISS,HIGH);
 	SPI.begin();
 	SPI.beginTransaction(SPISettings(SPISPEED, MSBFIRST, SPI_MODE0));
-	Serial.print("SPI clk "); Serial.println(SPISPEED);
  	dma_init();
 }
 
 void loop() {
     int i, errs=0;
     unsigned long t1;
-digitalWrite(SPISS,LOW);
-    for (i=0;i<BYTES;i++) src[i] =  i;
- digitalWrite(SPISS,HIGH);
-  delayMicroseconds(15);
-#if 1
+
+	Serial.print("SPI clk "); Serial.println(SPISPEED);
+	digitalWrite(SPISS,LOW);
+    for (i=0;i<BYTES;i++) txbuf[i] =  i;
+ 	digitalWrite(SPISS,HIGH);
+  	delayMicroseconds(15);
+
     t1 = micros();
 	digitalWrite(SPISS,LOW);
-	spi_write(src,BYTES);
+	spi_write(txbuf,BYTES);
 	digitalWrite(SPISS,HIGH);
     t1 = micros() -t1;
-    prmbs("SPI write",t1,BYTES*8);
-#else
+    prmbs("DMA write",t1,BYTES*8);
+
     t1 = micros();
 	digitalWrite(SPISS,LOW);
-	for(i=0;i<BYTES;i++) SPI.transfer(src[i]);
+	spi_read(rxbuf,BYTES);
+	digitalWrite(SPISS,HIGH);
+    t1 = micros() -t1;
+    prmbs("DMA read",t1,BYTES*8);
+
+    t1 = micros();
+	digitalWrite(SPISS,LOW);
+	spi_transfer(txbuf,rxbuf,BYTES);
+	digitalWrite(SPISS,HIGH);
+    t1 = micros() -t1;
+    prmbs("DMA read/write",t1,BYTES*8);
+
+    t1 = micros();
+	digitalWrite(SPISS,LOW);
+	for(i=0;i<BYTES;i++) SPI.transfer(txbuf[i]);
 	digitalWrite(SPISS,HIGH);
     t1 = micros() -t1;
     prmbs("SPI transfer",t1,BYTES*8);
-#endif
+
 	delay(3000);
 }
