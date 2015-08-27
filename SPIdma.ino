@@ -67,7 +67,8 @@ void dma_init() {
 	DMAC->CTRL.reg = DMAC_CTRL_DMAENABLE | DMAC_CTRL_LVLEN(0xf);
 }
 
-Sercom *sercom = (Sercom   *)0x42001800U;  // SERCOM4   TODO
+
+Sercom *sercom = (Sercom   *)SERCOM4;  // SPI SERCOM
 
 void spi_xfr(void *txdata, void *rxdata,  size_t n) {
 	uint32_t temp_CHCTRLB_reg;
