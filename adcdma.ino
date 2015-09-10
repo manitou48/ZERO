@@ -4,8 +4,8 @@
 //   http://www.atmel.com/Images/Atmel-42258-ASF-Manual-SAM-D21_AP-Note_AT07627.pdf pg 73
 
 #define ADCPIN A1
-#define HWORDS 32
-uint16_t adcbuf[HWORDS];     // max of 128 for HWORDS ??
+#define HWORDS 1024
+uint16_t adcbuf[HWORDS];     
 
 typedef struct {
     uint16_t btctrl;
@@ -49,7 +49,7 @@ void dma_init() {
     DMAC->CTRL.reg = DMAC_CTRL_DMAENABLE | DMAC_CTRL_LVLEN(0xf);
 }
 
-void adc_dma(void *rxdata,  size_t bytes) {
+void adc_dma(void *rxdata,  size_t hwords) {
     uint32_t temp_CHCTRLB_reg;
 
     DMAC->CHID.reg = DMAC_CHID_ID(chnl);
@@ -63,8 +63,8 @@ void adc_dma(void *rxdata,  size_t bytes) {
     dmadone = 0;
     descriptor.descaddr = 0;
     descriptor.srcaddr = (uint32_t) &ADC->RESULT.reg;
-    descriptor.btcnt =  bytes;
-    descriptor.dstaddr = (uint32_t)rxdata + bytes;   // end address
+    descriptor.btcnt =  hwords;
+    descriptor.dstaddr = (uint32_t)rxdata + hwords*2;   // end address
     descriptor.btctrl =  DMAC_BTCTRL_BEATSIZE_HWORD | DMAC_BTCTRL_DSTINC | DMAC_BTCTRL_VALID;
     memcpy(&descriptor_section[chnl],&descriptor, sizeof(dmacdescriptor));
 
@@ -91,7 +91,7 @@ void adc_init(){
   ADC->AVGCTRL.reg = 0x00 ;       //no averaging
   ADC->SAMPCTRL.reg = 0x00;  ; //sample length in 1/2 CLK_ADC cycles
   ADCsync();
-  ADC->CTRLB.reg = ADC_CTRLB_PRESCALER_DIV32 | ADC_CTRLB_FREERUN | ADC_CTRLB_RESSEL_10BIT;
+  ADC->CTRLB.reg = ADC_CTRLB_PRESCALER_DIV16 | ADC_CTRLB_FREERUN | ADC_CTRLB_RESSEL_10BIT;
   ADCsync();
   ADC->CTRLA.bit.ENABLE = 0x01;
   ADCsync();
@@ -110,7 +110,7 @@ void loop() {
 	uint32_t t;
 
 	t = micros();
-	adc_dma(adcbuf,sizeof(adcbuf));
+	adc_dma(adcbuf,HWORDS);
 	while(!dmadone);  // await DMA done isr
 	t = micros() - t;
 	Serial.print(t);  Serial.print(" us   ");
