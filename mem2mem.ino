@@ -61,7 +61,7 @@ void dma_init() {
 	DMAC->CHCTRLA.reg = DMAC_CHCTRLA_SWRST;
 }
 
-void memcpy8(void *dst, const void *src, size_t n) {
+void memcpy32(void *dst, const void *src, size_t n) {
 	DMAC->CHID.reg = DMAC_CHID_ID(chnl); // channel
 	DMAC->CHINTENSET.reg = DMAC_CHINTENSET_MASK ; // enable all 3 interrupts
 	dmadone = 0;
@@ -92,7 +92,7 @@ void loop() {
     prmbs("memcpy",t1,BYTES*8);
     memset(dst,0,BYTES);
     t1 = micros();
-	memcpy8(dst,src,BYTES);
+	memcpy32(dst,src,BYTES);
     t1 = micros() -t1;
     prmbs("dma",t1,BYTES*8);
     for (i=0;i<BYTES;i++) if (dst[i] !=  i%256)errs++;
