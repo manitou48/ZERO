@@ -80,6 +80,7 @@ static void   ADCsync() {
 
 
 void adc_init(){
+  analogRead(ADCPIN);  // do some pin init  pinPeripheral()
   ADCsync();
   //ADC->REFCTRL.bit.REFSEL = ADC_REFCTRL_REFSEL_INTVCC0_Val; //  2.2297 V Supply VDDANA
   //ADC->INPUTCTRL.bit.GAIN = ADC_INPUTCTRL_GAIN_1X_Val;      // Gain select as 1X
