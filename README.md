@@ -13,3 +13,5 @@ pwmDMAev.ino  DMA controlled PWM, events to to timer capture DMA
 SPIdma.ino  SPI + DMA,  2 channels
 
 IRtest/     demo IRremote transmit and receive
+
+pwmwrite.ino  demo of running high frequency PWM, hack of wiring_analog.c
